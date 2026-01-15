@@ -1,7 +1,8 @@
 --[[ 
-    RED TEAM TOOL: AUTO-FARM V7 (ENTITY SLAYER)
-    - Foco: Pasta 'EntityFolder' (Onde vivem os mobs 0_E_1).
-    - Auto-Quest + Auto-Travel (Segue Seta) + God Mode Kill.
+    RED TEAM TOOL: AUTO-FARM V6 (THE SLAYER)
+    - Auto-Quest (Teleport)
+    - Auto-Travel (Segue a Seta/Track)
+    - Kill Aura (Flutua e Mata)
 ]]
 
 local Players = game:GetService("Players")
@@ -15,8 +16,8 @@ local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 -- ================= CONFIGURAÇÃO =================
 local CONFIG = {
     TeleportDelay = 1.2,
-    AttackDist = 80,    -- Aumentei para detectar mobs longe
-    HeightOffset = 8,   -- Altura do God Mode
+    AttackDist = 50,    -- Distância para detectar inimigo
+    HeightOffset = 8,   -- Altura que ele flutua acima do mob (God Mode)
 }
 
 local IDS = {
@@ -26,22 +27,22 @@ local IDS = {
 }
 
 -- Estado Global
-getgenv().EntitySlayerActive = false
-local CurrentState = "HUNTING" -- Estados: HUNTING, TRAVELING, KILLING
+getgenv().SlayerActive = false
+local CurrentState = "HUNTING" -- HUNTING, TRAVELING, KILLING
 local VisitedList = {} 
 local CurrentTargetMob = nil
 
 -- ================= INTERFACE =================
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "EntitySlayerUI"
+ScreenGui.Name = "SlayerUI"
 if getgenv and getgenv().gethui then ScreenGui.Parent = getgenv().gethui() else ScreenGui.Parent = CoreGui end
 
 local MainFrame = Instance.new("Frame")
 MainFrame.Size = UDim2.new(0, 220, 0, 120)
 MainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(10, 0, 20) -- Roxo Profundo
+MainFrame.BackgroundColor3 = Color3.fromRGB(20, 0, 0) -- Vermelho Sangue
 MainFrame.BorderSizePixel = 2
-MainFrame.BorderColor3 = Color3.fromRGB(150, 0, 255)
+MainFrame.BorderColor3 = Color3.fromRGB(255, 0, 0)
 MainFrame.Active = true
 MainFrame.Draggable = true
 MainFrame.Parent = ScreenGui
@@ -52,13 +53,13 @@ StatusLbl.Size = UDim2.new(1, 0, 0.3, 0)
 StatusLbl.BackgroundTransparency = 1
 StatusLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
 StatusLbl.Font = Enum.Font.GothamBlack
-StatusLbl.TextSize = 13
+StatusLbl.TextSize = 14
 StatusLbl.Parent = MainFrame
 
 local ToggleBtn = Instance.new("TextButton")
 ToggleBtn.Size = UDim2.new(0.9, 0, 0.4, 0)
 ToggleBtn.Position = UDim2.new(0.05, 0, 0.5, 0)
-ToggleBtn.Text = "LIGAR FARM"
+ToggleBtn.Text = "LIGAR SLAYER"
 ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 0)
 ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleBtn.Font = Enum.Font.GothamBlack
@@ -70,22 +71,23 @@ local function cleanID(str)
     return tostring(str):match("%d+") or "NIL"
 end
 
+-- Simula Clique (Ataque)
 local function attack()
     VirtualUser:CaptureController()
     VirtualUser:ClickButton1(Vector2.new(999, 999))
 end
 
--- Verifica se tem missão ativa
+-- Verifica se a Missão está ativa (GUI Track ou XP)
 local function hasActiveQuest()
-    -- 1. Verifica Seta (Track)
+    -- 1. Verifica GUI Track (Seta)
     local track = PlayerGui:FindFirstChild("Track")
     if track and track.Enabled then return true end
     
-    -- 2. Verifica Texto de Objetivo
+    -- 2. Verifica GUI de XP/Objetivo
     for _, gui in pairs(PlayerGui:GetChildren()) do
         if gui:IsA("ScreenGui") and gui.Enabled then
             for _, lbl in pairs(gui:GetDescendants()) do
-                if lbl:IsA("TextLabel") and (string.find(lbl.Text, "/") or string.find(lbl.Text:lower(), "matar")) then
+                if lbl:IsA("TextLabel") and (string.find(lbl.Text, "/") or string.find(lbl.Text, "Matar")) then
                     return true
                 end
             end
@@ -94,41 +96,40 @@ local function hasActiveQuest()
     return false
 end
 
--- Pega o destino da seta (Portal/Mob)
+-- Tenta descobrir para onde a seta aponta
 local function getQuestDestination()
     local track = PlayerGui:FindFirstChild("Track")
     if track then
+        -- Tenta achar o Adornee (Peça que a seta segue)
         for _, v in pairs(track:GetDescendants()) do
             if v:IsA("BillboardGui") and v.Adornee then
-                return v.Adornee 
+                return v.Adornee -- Achamos o alvo!
             end
         end
     end
     return nil
 end
 
--- PROCURA MOBS NA PASTA 'EntityFolder'
-local function findEntityMob()
+-- Kill Aura (Encontra mob mais próximo)
+local function findNearestMob()
     local myRoot = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
     if not myRoot then return nil end
     
-    local folder = workspace:FindFirstChild("EntityFolder") -- O SEGREDO ESTÁ AQUI
-    if not folder then return nil end
-
     local closest = nil
     local minDist = CONFIG.AttackDist
     
-    for _, model in pairs(folder:GetChildren()) do
-        if model:IsA("Model") then
-            local hum = model:FindFirstChild("Humanoid")
-            local root = model:FindFirstChild("HumanoidRootPart")
-            
-            -- Verifica se está vivo e perto
-            if hum and root and hum.Health > 0 then
-                local dist = (root.Position - myRoot.Position).Magnitude
+    for _, obj in pairs(workspace:GetDescendants()) do
+        if obj:IsA("Humanoid") and obj.Parent ~= LocalPlayer.Character and obj.Health > 0 then
+            local mobRoot = obj.Parent:FindFirstChild("HumanoidRootPart")
+            if mobRoot then
+                local dist = (mobRoot.Position - myRoot.Position).Magnitude
                 if dist < minDist then
-                    minDist = dist
-                    closest = model
+                    -- Filtro Básico: Ignora NPCs de Missão (Geralmente tem nome fixo ou não tomam dano)
+                    -- Aqui vamos assumir que se tem vida e não é player, é mob
+                    if not Players:GetPlayerFromCharacter(obj.Parent) then
+                        minDist = dist
+                        closest = obj.Parent
+                    end
                 end
             end
         end
@@ -138,34 +139,36 @@ end
 
 -- ================= LÓGICA DE ESTADOS =================
 
--- 1. CAÇAR MISSÃO
+-- 1. CAÇAR MISSÃO (Igual V5)
 local function huntPhase()
-    StatusLbl.Text = "BUSCANDO NPC..."
+    StatusLbl.Text = "CAÇANDO MISSÃO..."
     
-    -- Tenta Aceitar
+    -- Verifica se abriu painel para aceitar
     for _, gui in pairs(PlayerGui:GetChildren()) do
         if gui:IsA("ScreenGui") and gui.Enabled then
             for _, btn in pairs(gui:GetDescendants()) do
                 if (btn:IsA("TextButton") or btn:IsA("ImageButton")) and btn.Visible then
                     if string.find(btn.Name:upper(), "ACCEPT") or string.find((btn.Text or ""):upper(), "ACEITAR") then
+                        -- Clica Aceitar
                         pcall(function() 
                              for _, c in pairs(getconnections(btn.MouseButton1Click)) do c:Fire() end
                              fireclickdetector(btn)
                         end)
                         task.wait(1)
-                        return 
+                        return -- Aceitou
                     end
                 end
             end
         end
     end
 
+    -- Se já tem missão, muda de fase
     if hasActiveQuest() then
         CurrentState = "TRAVELING"
         return
     end
 
-    -- Teleporta nos NPCs
+    -- Teleporte Hunter (Lógica V5 Simplificada)
     local foundBlue = {}
     for _, obj in pairs(workspace:GetDescendants()) do
         if obj.Name == "Quest Simbol" then
@@ -180,7 +183,7 @@ local function huntPhase()
                 end
                 
                 if type == "YELLOW" or type == "RED" then
-                    -- Vai direto
+                    -- Vai direto e tenta pegar
                     if LocalPlayer.Character.HumanoidRootPart then
                          LocalPlayer.Character.HumanoidRootPart.CFrame = model.HumanoidRootPart.CFrame
                          local prompt = model:FindFirstChildWhichIsA("ProximityPrompt", true)
@@ -202,62 +205,64 @@ local function huntPhase()
             task.wait(CONFIG.TeleportDelay)
         end
     else
-        VisitedList = {}
+        VisitedList = {} -- Reseta lista
     end
 end
 
--- 2. VIAJAR (Seguir Seta)
+-- 2. VIAJAR (Ir até o Portal/Objetivo)
 local function travelPhase()
-    StatusLbl.Text = "INDO PRO LOCAL..."
+    StatusLbl.Text = "INDO PRO OBJETIVO..."
     
     local dest = getQuestDestination()
     if dest then
+        -- Teleporta para o alvo da seta
         if LocalPlayer.Character.HumanoidRootPart then
             LocalPlayer.Character.HumanoidRootPart.CFrame = dest.CFrame * CFrame.new(0, 5, 0)
-            -- Se tiver mob perto, muda pra matar
-            if findEntityMob() then
-                CurrentState = "KILLING"
-            end
+            CurrentState = "KILLING" -- Chegou, hora de matar
         end
     else
-        -- Seta sumiu? Procura mob na EntityFolder direto
-        if findEntityMob() then
+        -- Se não achou destino (seta bugada), tenta procurar mobs perto
+        local mob = findNearestMob()
+        if mob then
             CurrentState = "KILLING"
         else
             StatusLbl.Text = "PROCURANDO DESTINO..."
+            -- Pode adicionar lógica de vagar aqui se travar
         end
     end
 end
 
--- 3. MATAR (Foco na EntityFolder)
+-- 3. MATAR (Kill Aura + God Mode)
 local function killPhase()
-    local mob = findEntityMob() -- Usa a função nova otimizada
+    local mob = findNearestMob()
     
     if mob then
         CurrentTargetMob = mob
-        StatusLbl.Text = "MATANDO: " .. mob.Name -- Vai aparecer 0_E_1
+        StatusLbl.Text = "MATANDO: " .. mob.Name
         StatusLbl.TextColor3 = Color3.fromRGB(255, 0, 0)
         
         local myRoot = LocalPlayer.Character.HumanoidRootPart
         local mobRoot = mob:FindFirstChild("HumanoidRootPart")
         
         if myRoot and mobRoot then
-            -- God Mode
+            -- God Mode: Fica em cima da cabeça
             myRoot.CFrame = mobRoot.CFrame * CFrame.new(0, CONFIG.HeightOffset, 0)
             -- Olha pra baixo
             myRoot.CFrame = CFrame.new(myRoot.Position, mobRoot.Position)
+            -- Zera velocidade pra não cair
             myRoot.AssemblyLinearVelocity = Vector3.new(0,0,0)
             
+            -- Ataca
             attack()
         end
     else
-        StatusLbl.Text = "AREA LIMPA..."
+        StatusLbl.Text = "PROCURANDO MOBS..."
         StatusLbl.TextColor3 = Color3.fromRGB(255, 255, 0)
-        
+        -- Se não tem mob perto, verifica se a missão acabou
         if not hasActiveQuest() then
-            CurrentState = "HUNTING" -- Acabou, volta a caçar
+            CurrentState = "HUNTING" -- Missão acabou, volta a caçar
         else
-            -- Ainda tem missão mas não achou mob? Segue a seta de novo
+            -- Missão ativa mas sem mob? Tenta ver a seta de novo (talvez mudou de lugar)
             local dest = getQuestDestination()
             if dest then
                  if LocalPlayer.Character.HumanoidRootPart then
@@ -268,13 +273,13 @@ local function killPhase()
     end
 end
 
--- ================= LOOP =================
+-- ================= LOOP PRINCIPAL =================
 task.spawn(function()
-    while task.wait() do -- Loop ultra rápido
-        if not getgenv().EntitySlayerActive then continue end
+    while task.wait(0.1) do
+        if not getgenv().SlayerActive then continue end
         if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then continue end
 
-        -- Auto-Equip
+        -- Equipa Arma (Se tiver)
         local backpack = LocalPlayer.Backpack
         local char = LocalPlayer.Character
         if not char:FindFirstChildWhichIsA("Tool") then
@@ -282,6 +287,7 @@ task.spawn(function()
              if tool then tool.Parent = char end
         end
 
+        -- Máquina de Estados
         if CurrentState == "HUNTING" then
             huntPhase()
         elseif CurrentState == "TRAVELING" then
@@ -293,13 +299,13 @@ task.spawn(function()
 end)
 
 ToggleBtn.MouseButton1Click:Connect(function()
-    getgenv().EntitySlayerActive = not getgenv().EntitySlayerActive
-    if getgenv().EntitySlayerActive then
-        ToggleBtn.Text = "PARAR"
+    getgenv().SlayerActive = not getgenv().SlayerActive
+    if getgenv().SlayerActive then
+        ToggleBtn.Text = "PARAR SLAYER"
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
         CurrentState = "HUNTING"
     else
-        ToggleBtn.Text = "LIGAR FARM"
+        ToggleBtn.Text = "LIGAR SLAYER"
         ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 0)
         StatusLbl.Text = "PARADO"
     end
