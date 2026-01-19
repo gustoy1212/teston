@@ -1,307 +1,408 @@
---[[ 
-    RED TEAM TOOL: AUTO-FARM V8 (TITAN SLAYER)
-    - Volta do Teleporte em NPCs (Gafanhoto).
-    - Foco total na EntityFolder (Mobs 34_E_0, etc).
-    - Ciclo: Achar Missão -> Aceitar -> Teleportar p/ Mob -> Matar -> Repetir.
+```lua
+--[[
+    📈 ROBLOX PERFORMANCE MONITOR & WORKSPACE LOGGER (CLIENT-SIDE)
+
+    O que faz: Este LocalScript oferece uma interface de usuário para monitorar o desempenho do cliente
+               (FPS, Ping, Memória) em tempo real e para escanear o Workspace, listando detalhes
+               de instâncias, como contagem de partes, modelos, scripts e identificando
+               potenciais "problemas" ou objetos notáveis.
+
+    Objetivo: Ajuda a identificar gargalos de performance e elementos inesperados no ambiente de jogo
+              do cliente, útil para depuração e otimização.
 ]]
 
 local Players = game:GetService("Players")
-local CoreGui = game:GetService("CoreGui")
 local RunService = game:GetService("RunService")
-local VirtualUser = game:GetService("VirtualUser")
+local CoreGui = game:GetService("CoreGui")
+local Workspace = game:GetService("Workspace")
 
 local LocalPlayer = Players.LocalPlayer
-local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
 
--- ================= CONFIGURAÇÃO =================
-local CONFIG = {
-    TeleportDelay = 1.2, -- Velocidade do pulo entre NPCs
-    AttackDist = 5000,   -- Raio gigantesco para achar mobs no mapa todo
-    HeightOffset = 9,    -- Altura do God Mode (Flutuar)
-    MobWaitTime = 5,     -- Tempo que espera os mobs spawnarem depois de aceitar
-}
+--// =========================================================================================
+--// 1. CONFIGURAÇÃO DA GUI
+--// =========================================================================================
+local GUI_NAME = "PerformanceMonitor"
+local UPDATE_INTERVAL_PERF = 0.5 -- Intervalo em segundos para atualizar métricas de desempenho
+local UPDATE_INTERVAL_WORKSPACE = 5 -- Intervalo em segundos para escanear o Workspace (no modo automático)
 
-local IDS = {
-    ["74232140704943"] = "BLUE",   
-    ["134433042638721"] = "YELLOW",
-    ["88108791549573"] = "RED"
-}
+-- Destrói qualquer GUI anterior com o mesmo nome para evitar duplicatas
+if CoreGui:FindFirstChild(GUI_NAME) then
+    CoreGui[GUI_NAME]:Destroy()
+end
 
--- Estado Global
-getgenv().TitanActive = false
-local CurrentState = "SEARCHING" -- Estados: SEARCHING, WAITING_MOBS, KILLING
-local VisitedNPCs = {} 
-local CurrentMob = nil
-local QuestAcceptTime = 0
-
--- ================= INTERFACE =================
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "TitanSlayerUI"
-if getgenv and getgenv().gethui then ScreenGui.Parent = getgenv().gethui() else ScreenGui.Parent = CoreGui end
+ScreenGui.Name = GUI_NAME
+ScreenGui.Parent = CoreGui
 
 local MainFrame = Instance.new("Frame")
-MainFrame.Size = UDim2.new(0, 240, 0, 110)
-MainFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(5, 5, 10)
-MainFrame.BorderSizePixel = 2
-MainFrame.BorderColor3 = Color3.fromRGB(0, 255, 255) -- Ciano Neon
+MainFrame.Name = "MonitorFrame"
+MainFrame.Size = UDim2.new(0, 500, 0, 450)
+MainFrame.Position = UDim2.new(0.5, -250, 0.3, -150) -- Posição inicial centralizada, um pouco acima
+MainFrame.BackgroundColor3 = Color3.fromRGB(15, 15, 20)
 MainFrame.Active = true
 MainFrame.Draggable = true
+MainFrame.BorderSizePixel = 0
 MainFrame.Parent = ScreenGui
 
-local StatusLbl = Instance.new("TextLabel")
-StatusLbl.Text = "STATUS: PARADO"
-StatusLbl.Size = UDim2.new(1, 0, 0.3, 0)
-StatusLbl.BackgroundTransparency = 1
-StatusLbl.TextColor3 = Color3.fromRGB(255, 255, 255)
-StatusLbl.Font = Enum.Font.GothamBlack
-StatusLbl.TextSize = 14
-StatusLbl.Parent = MainFrame
+local UIStroke = Instance.new("UIStroke")
+UIStroke.Color = Color3.fromRGB(0, 200, 255)
+UIStroke.Thickness = 2
+UIStroke.Parent = MainFrame
 
-local ToggleBtn = Instance.new("TextButton")
-ToggleBtn.Size = UDim2.new(0.9, 0, 0.4, 0)
-ToggleBtn.Position = UDim2.new(0.05, 0, 0.5, 0)
-ToggleBtn.Text = "LIGAR TITAN"
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 0)
-ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
-ToggleBtn.Font = Enum.Font.GothamBlack
-ToggleBtn.Parent = MainFrame
+local Title = Instance.new("TextLabel")
+Title.Name = "TitleLabel"
+Title.Size = UDim2.new(1, 0, 0, 30)
+Title.Text = "📈 MONITOR DE PERFORMANCE & WORKSPACE"
+Title.Font = Enum.Font.GothamBold
+Title.TextColor3 = Color3.fromRGB(0, 200, 255)
+Title.BackgroundTransparency = 1
+Title.TextSize = 16
+Title.Parent = MainFrame
 
--- ================= FUNÇÕES DE COMBATE/SISTEMA =================
+-- Frame para as métricas de desempenho
+local PerfMetricsFrame = Instance.new("Frame")
+PerfMetricsFrame.Name = "PerformanceMetrics"
+PerfMetricsFrame.Size = UDim2.new(0.9, 0, 0.2, 0)
+PerfMetricsFrame.Position = UDim2.new(0.05, 0, 0.08, 0)
+PerfMetricsFrame.BackgroundColor3 = Color3.fromRGB(25, 25, 30)
+PerfMetricsFrame.BorderSizePixel = 0
+PerfMetricsFrame.Parent = MainFrame
 
-local function cleanID(str)
-    return tostring(str):match("%d+") or "NIL"
+local Layout = Instance.new("UIListLayout")
+Layout.Padding = UDim.new(0, 5)
+Layout.FillDirection = Enum.FillDirection.Vertical
+Layout.HorizontalAlignment = Enum.HorizontalAlignment.Left
+Layout.VerticalAlignment = Enum.VerticalAlignment.Top
+Layout.Parent = PerfMetricsFrame
+
+local function createMetricLabel(name, parent)
+    local label = Instance.new("TextLabel")
+    label.Name = name .. "Label"
+    label.Size = UDim2.new(1, 0, 0, 20)
+    label.Text = name .. ": --"
+    label.Font = Enum.Font.Code
+    label.TextSize = 12
+    label.TextColor3 = Color3.fromRGB(200, 200, 200)
+    label.BackgroundTransparency = 1
+    label.TextXAlignment = Enum.TextXAlignment.Left
+    label.Parent = parent
+    return label
 end
 
-local function attack()
-    VirtualUser:CaptureController()
-    VirtualUser:ClickButton1(Vector2.new(999, 999))
+local FPSLabel = createMetricLabel("FPS", PerfMetricsFrame)
+local PingLabel = createMetricLabel("Ping", PerfMetricsFrame)
+local MemoryLabel = createMetricLabel("Memory (MB)", PerfMetricsFrame)
+local PartCountLabel = createMetricLabel("Workspace Parts", PerfMetricsFrame)
+local ScriptCountLabel = createMetricLabel("Workspace Scripts", PerfMetricsFrame)
+
+-- Log Box para o scanner do Workspace
+local LogBoxScrollingFrame = Instance.new("ScrollingFrame")
+LogBoxScrollingFrame.Name = "WorkspaceLogBox"
+LogBoxScrollingFrame.Size = UDim2.new(0.9, 0, 0.5, 0)
+LogBoxScrollingFrame.Position = UDim2.new(0.05, 0, 0.3, 0)
+LogBoxScrollingFrame.BackgroundColor3 = Color3.fromRGB(10, 10, 15)
+LogBoxScrollingFrame.BorderSizePixel = 0
+LogBoxScrollingFrame.CanvasSize = UDim2.new(0, 0, 0, 0) -- Será ajustado automaticamente
+LogBoxScrollingFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+LogBoxScrollingFrame.Parent = MainFrame
+
+local LogText = Instance.new("TextLabel")
+LogText.Name = "LogText"
+LogText.Size = UDim2.new(1, 0, 0, 0) -- Altura será ajustada automaticamente
+LogText.AutomaticSize = Enum.AutomaticSize.Y
+LogText.TextColor3 = Color3.fromRGB(0, 255, 0)
+LogText.BackgroundTransparency = 1
+LogText.TextXAlignment = Enum.TextXAlignment.Left
+LogText.TextYAlignment = Enum.TextYAlignment.Top
+LogText.Font = Enum.Font.Code
+LogText.TextSize = 11
+LogText.TextWrapped = true
+LogText.Text = "Monitoramento iniciado. Clique em 'Escanear Workspace' para começar.\n"
+LogText.Parent = LogBoxScrollingFrame
+
+-- Botões de Ação
+local ScanBtn = Instance.new("TextButton")
+ScanBtn.Name = "ScanButton"
+ScanBtn.Size = UDim2.new(0.4, 0, 0.1, 0)
+ScanBtn.Position = UDim2.new(0.05, 0, 0.83, 0)
+ScanBtn.BackgroundColor3 = Color3.fromRGB(50, 100, 150)
+ScanBtn.Text = "ESCANEAR WORKSPACE"
+ScanBtn.TextColor3 = Color3.new(1, 1, 1)
+ScanBtn.Font = Enum.Font.GothamBold
+ScanBtn.TextSize = 14
+ScanBtn.Parent = MainFrame
+
+local CopyBtn = Instance.new("TextButton")
+CopyBtn.Name = "CopyButton"
+CopyBtn.Size = UDim2.new(0.4, 0, 0.1, 0)
+CopyBtn.Position = UDim2.new(0.55, 0, 0.83, 0)
+CopyBtn.BackgroundColor3 = Color3.fromRGB(0, 150, 100)
+CopyBtn.Text = "COPIAR LOGS"
+CopyBtn.TextColor3 = Color3.new(1, 1, 1)
+CopyBtn.Font = Enum.Font.GothamBold
+CopyBtn.TextSize = 14
+CopyBtn.Parent = MainFrame
+
+local TogglePerfBtn = Instance.new("TextButton")
+TogglePerfBtn.Name = "TogglePerfButton"
+TogglePerfBtn.Size = UDim2.new(0.4, 0, 0.08, 0)
+TogglePerfBtn.Position = UDim2.new(0.05, 0, 0.94, 0)
+TogglePerfBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 50)
+TogglePerfBtn.Text = "PARAR MONITORAMENTO PERF."
+TogglePerfBtn.TextColor3 = Color3.new(1, 1, 1)
+TogglePerfBtn.Font = Enum.Font.GothamBold
+TogglePerfBtn.TextSize = 12
+TogglePerfBtn.Parent = MainFrame
+
+local ToggleAutoScanBtn = Instance.new("TextButton")
+ToggleAutoScanBtn.Name = "ToggleAutoScanButton"
+ToggleAutoScanBtn.Size = UDim2.new(0.4, 0, 0.08, 0)
+ToggleAutoScanBtn.Position = UDim2.new(0.55, 0, 0.94, 0)
+ToggleAutoScanBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+ToggleAutoScanBtn.Text = "INICIAR AUTO-SCAN"
+ToggleAutoScanBtn.TextColor3 = Color3.new(1, 1, 1)
+ToggleAutoScanBtn.Font = Enum.Font.GothamBold
+ToggleAutoScanBtn.TextSize = 12
+ToggleAutoScanBtn.Parent = MainFrame
+
+--// =========================================================================================
+--// 2. VARIÁVEIS DE ESTADO E LOG
+--// =========================================================================================
+local currentLogData = ""
+local performanceMonitoringEnabled = true
+local autoScanEnabled = false
+local lastPerfUpdate = 0
+local lastWorkspaceScan = 0
+local lastFpsTable = {}
+local MAX_FPS_SAMPLES = 60 -- Para média de FPS
+
+--// =========================================================================================
+--// 3. FUNÇÕES DE LÓGICA
+--// =========================================================================================
+
+local function getFPSColor(fps)
+    if fps >= 58 then
+        return Color3.fromRGB(0, 255, 0) -- Verde (Excelente)
+    elseif fps >= 30 then
+        return Color3.fromRGB(255, 255, 0) -- Amarelo (Bom)
+    else
+        return Color3.fromRGB(255, 0, 0) -- Vermelho (Ruim)
+    end
 end
 
--- Busca qualquer coisa viva na EntityFolder
-local function findEntityMob()
-    local folder = workspace:FindFirstChild("EntityFolder")
-    if not folder then return nil end
+local function getPingColor(ping)
+    if ping <= 100 then
+        return Color3.fromRGB(0, 255, 0) -- Verde (Excelente)
+    elseif ping <= 250 then
+        return Color3.fromRGB(255, 255, 0) -- Amarelo (Moderado)
+    else
+        return Color3.fromRGB(255, 0, 0) -- Vermelho (Alto)
+    end
+end
 
-    local myPos = LocalPlayer.Character.HumanoidRootPart.Position
-    local closest = nil
-    local minDist = CONFIG.AttackDist
-    
-    for _, model in pairs(folder:GetChildren()) do
-        if model:IsA("Model") then
-            local hum = model:FindFirstChild("Humanoid")
-            local root = model:FindFirstChild("HumanoidRootPart")
-            
-            -- Verifica se tem vida > 0
-            if hum and root and hum.Health > 0 then
-                local dist = (root.Position - myPos).Magnitude
-                if dist < minDist then
-                    minDist = dist
-                    closest = model
+local function getMemoryColor(memMb)
+    if memMb <= 500 then
+        return Color3.fromRGB(0, 255, 0) -- Verde (Baixo)
+    elseif memMb <= 1000 then
+        return Color3.fromRGB(255, 255, 0) -- Amarelo (Médio)
+    else
+        return Color3.fromRGB(255, 0, 0) -- Vermelho (Alto)
+    end
+end
+
+-- Atualiza as métricas de desempenho na GUI
+local function updatePerformanceMetrics()
+    if not performanceMonitoringEnabled then return end
+
+    -- FPS (calculado manualmente para maior precisão em scripts de usuário)
+    local currentFps = math.round(1 / RunService.Heartbeat:Wait()) -- Simples, pega o FPS atual
+    table.insert(lastFpsTable, currentFps)
+    if #lastFpsTable > MAX_FPS_SAMPLES then
+        table.remove(lastFpsTable, 1)
+    end
+    local totalFps = 0
+    for _, fps in ipairs(lastFpsTable) do
+        totalFps += fps
+    end
+    local avgFps = totalFps / #lastFpsTable
+
+    FPSLabel.Text = string.format("FPS: %.1f", avgFps)
+    FPSLabel.TextColor3 = getFPSColor(avgFps)
+
+    -- Ping
+    local ping = LocalPlayer:GetNetworkPing() * 1000 -- Convertendo para milissegundos
+    PingLabel.Text = string.format("Ping: %d ms", math.round(ping))
+    PingLabel.TextColor3 = getPingColor(ping)
+
+    -- Memória (em MB)
+    local memoryUsageMb = debug.getmemoryusage() / 1024 / 1024
+    MemoryLabel.Text = string.format("Memória Cliente: %.2f MB", memoryUsageMb)
+    MemoryLabel.TextColor3 = getMemoryColor(memoryUsageMb)
+end
+
+-- Escaneia o Workspace e atualiza os logs
+local function scanWorkspace()
+    task.spawn(function()
+        currentLogData = "--- RELATÓRIO DO WORKSPACE ---\n"
+        LogText.Text = currentLogData
+        LogText:SetAttribute("CurrentLog", currentLogData) -- Usar atributo para armazenar o texto completo
+        LogBoxScrollingFrame.CanvasPosition = Vector2.new(0, 0) -- Volta para o topo
+
+        local totalParts = 0
+        local totalModels = 0
+        local totalScripts = 0
+        local totalUnions = 0
+        local totalMeshParts = 0
+        local anchoredParts = 0
+        local unanchoredParts = 0
+        local potentialProblems = {}
+
+        local descendants = Workspace:GetDescendants()
+
+        for _, instance in ipairs(descendants) do
+            if instance:IsA("BasePart") then
+                totalParts += 1
+                if instance.Anchored then
+                    anchoredParts += 1
+                else
+                    unanchoredParts += 1
+                end
+                if instance:IsA("MeshPart") then totalMeshParts += 1 end
+                if instance:IsA("UnionOperation") then totalUnions += 1 end
+
+                -- Verificar partes muito distantes (pode indicar problemas de otimização/limpeza)
+                if instance.Position.Magnitude > 10000 and instance.Anchored == false then -- 10000 studs de distância
+                    table.insert(potentialProblems, string.format("  [!] Parte UNANCHORED MUITO LONGE: %s (%.0f studs)", instance:GetFullName(), instance.Position.Magnitude))
+                end
+
+            elseif instance:IsA("Model") then
+                totalModels += 1
+            elseif instance:IsA("Script") or instance:IsA("LocalScript") or instance:IsA("ModuleScript") then
+                totalScripts += 1
+                if instance.Parent == Workspace or instance.Parent:IsA("Model") and instance.Parent.Parent == Workspace then
+                    table.insert(potentialProblems, string.format("  [!] Script em WORKSPACE: %s", instance:GetFullName()))
                 end
             end
         end
-    end
-    return closest
-end
 
--- Teleporte seguro
-local function safeTeleport(targetCFrame)
-    if LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then
-        LocalPlayer.Character.HumanoidRootPart.CFrame = targetCFrame
-        LocalPlayer.Character.HumanoidRootPart.AssemblyLinearVelocity = Vector3.new(0,0,0)
-    end
-end
+        currentLogData = currentLogData .. string.format("Total de Instâncias: %d\n", #descendants)
+        currentLogData = currentLogData .. string.format("Partes (total): %d (Ancoradas: %d, Desancoradas: %d)\n", totalParts, anchoredParts, unanchoredParts)
+        currentLogData = currentLogData .. string.format("MeshParts: %d\n", totalMeshParts)
+        currentLogData = currentLogData .. string.format("Unions: %d\n", totalUnions)
+        currentLogData = currentLogData .. string.format("Modelos: %d\n", totalModels)
+        currentLogData = currentLogData .. string.format("Scripts (total): %d\n", totalScripts)
 
--- ================= LÓGICA DE ESTADOS =================
-
--- 1. PROCURAR MISSÃO (Teleporte Gafanhoto)
-local function searchPhase()
-    StatusLbl.Text = "BUSCANDO NPC..."
-    StatusLbl.TextColor3 = Color3.fromRGB(0, 255, 255)
-
-    -- A. TENTA ACEITAR GUI SE TIVER ABERTA
-    local guiAccepted = false
-    for _, gui in pairs(PlayerGui:GetChildren()) do
-        if gui:IsA("ScreenGui") and gui.Enabled then
-            for _, btn in pairs(gui:GetDescendants()) do
-                if (btn:IsA("TextButton") or btn:IsA("ImageButton")) and btn.Visible then
-                    local txt = (btn.Text or ""):upper()
-                    -- Clica em ACEITAR ou Dialogos
-                    if string.find(txt, "ACEITAR") or string.find(btn.Name:upper(), "ACCEPT") or string.find(btn.Name:upper(), "CONFIRM") then
-                        pcall(function() 
-                            fireclickdetector(btn) 
-                            for _, c in pairs(getconnections(btn.MouseButton1Click)) do c:Fire() end
-                        end)
-                        guiAccepted = true
-                    end
-                end
+        if #potentialProblems > 0 then
+            currentLogData = currentLogData .. "\n--- POTENCIAIS PROBLEMAS/ATENÇÕES ---\n"
+            for _, problem in ipairs(potentialProblems) do
+                currentLogData = currentLogData .. problem .. "\n"
             end
+        else
+            currentLogData = currentLogData .. "\nNenhum problema aparente encontrado no Workspace.\n"
         end
-    end
 
-    if guiAccepted then
-        -- Se clicou em aceitar, muda para espera dos mobs
-        StatusLbl.Text = "MISSÃO ACEITA! ESPERANDO MOBS..."
-        CurrentState = "WAITING_MOBS"
-        QuestAcceptTime = os.time()
+        currentLogData = currentLogData .. "-----------------------------------------\n"
+        LogText.Text = currentLogData
+        LogText:SetAttribute("CurrentLog", currentLogData)
+
+        PartCountLabel.Text = string.format("Workspace Parts: %d", totalParts)
+        ScriptCountLabel.Text = string.format("Workspace Scripts: %d", totalScripts)
+
+        ScanBtn.Text = "ESCANEAR WORKSPACE (Completo)"
+    end)
+end
+
+-- Copia os logs para a área de transferência
+local function copyLogs()
+    if setclipboard then
+        setclipboard(LogText:GetAttribute("CurrentLog") or LogText.Text)
+        CopyBtn.Text = "COPIADO!"
         task.wait(1)
-        return
-    end
-
-    -- B. TELEPORTA PARA NPCS
-    local foundBlue = {}
-    local priorityNPC = nil
-
-    for _, obj in pairs(workspace:GetDescendants()) do
-        if obj.Name == "Quest Simbol" then
-            local model = obj.Parent.Parent
-            if model and model:IsA("Model") then
-                local type = nil
-                for _, img in pairs(obj:GetDescendants()) do
-                    if img:IsA("ImageLabel") then
-                        local id = cleanID(img.Image)
-                        if IDS[id] then type = IDS[id] end
-                    end
-                end
-                
-                if type == "YELLOW" or type == "RED" then
-                    priorityNPC = model
-                elseif type == "BLUE" then
-                    -- Só adiciona se não visitou recentemente
-                    if not VisitedNPCs[model] or (os.time() - VisitedNPCs[model] > 60) then
-                        table.insert(foundBlue, model)
-                    end
-                end
-            end
-        end
-    end
-
-    -- Lógica de Escolha
-    local target = priorityNPC
-    if not target and #foundBlue > 0 then
-        target = foundBlue[math.random(1, #foundBlue)]
-    end
-
-    if target and target:FindFirstChild("HumanoidRootPart") then
-        -- Teleporta
-        safeTeleport(target.HumanoidRootPart.CFrame * CFrame.new(0, 3, 0))
-        VisitedNPCs[target] = os.time()
-        
-        -- Interage (E)
-        local prompt = target:FindFirstChildWhichIsA("ProximityPrompt", true)
-        if prompt then fireproximityprompt(prompt) end
-        
-        task.wait(CONFIG.TeleportDelay)
+        CopyBtn.Text = "COPIAR LOGS"
     else
-        -- Se não achou nada, limpa lista para revisitar
-        if #foundBlue == 0 then VisitedNPCs = {} end
+        CopyBtn.Text = "ERRO (Ver F9)"
+        print("COPIAR LOGS:\n" .. (LogText:GetAttribute("CurrentLog") or LogText.Text))
     end
 end
 
--- 2. ESPERANDO MOBS (Delay tático)
-local function waitingPhase()
-    -- Verifica se mobs apareceram na EntityFolder
-    local mob = findEntityMob()
-    if mob then
-        StatusLbl.Text = "MOBS DETECTADOS!"
-        CurrentState = "KILLING"
-    else
-        StatusLbl.Text = "PROCURANDO MOBS/PORTAL..."
-        StatusLbl.TextColor3 = Color3.fromRGB(255, 100, 0)
-        
-        -- Se passou muito tempo e não achou mob, volta a procurar missão (talvez bugou)
-        if (os.time() - QuestAcceptTime) > 15 then
-            StatusLbl.Text = "TIMEOUT - VOLTANDO..."
-            CurrentState = "SEARCHING"
-        end
+-- Loop principal para atualização das métricas de desempenho e auto-scan
+RunService.Heartbeat:Connect(function(deltaTime)
+    local currentTime = os.clock()
+
+    if performanceMonitoringEnabled and (currentTime - lastPerfUpdate >= UPDATE_INTERVAL_PERF) then
+        updatePerformanceMetrics()
+        lastPerfUpdate = currentTime
     end
-end
 
--- 3. MATAR (Kill Aura)
-local function killingPhase()
-    local mob = findEntityMob()
-    
-    if mob then
-        CurrentMob = mob
-        StatusLbl.Text = "ELIMINANDO: " .. mob.Name
-        StatusLbl.TextColor3 = Color3.fromRGB(255, 0, 0)
-        
-        local myRoot = LocalPlayer.Character.HumanoidRootPart
-        local mobRoot = mob:FindFirstChild("HumanoidRootPart")
-        
-        if myRoot and mobRoot then
-            -- GOD MODE: Fica em cima da cabeça do mob
-            local godPos = mobRoot.CFrame * CFrame.new(0, CONFIG.HeightOffset, 0)
-            safeTeleport(godPos)
-            
-            -- Olha pra baixo (pra bater)
-            myRoot.CFrame = CFrame.new(myRoot.Position, mobRoot.Position)
-            
-            attack()
-        end
-    else
-        -- Se não tem mais mobs na pasta
-        StatusLbl.Text = "AREA LIMPA! VOLTANDO..."
-        StatusLbl.TextColor3 = Color3.fromRGB(0, 255, 0)
-        task.wait(1)
-        CurrentState = "SEARCHING"
-    end
-end
-
--- ================= LOOP PRINCIPAL =================
-task.spawn(function()
-    while task.wait() do
-        -- Visual ESP (Sempre Ativo)
-        for _, obj in pairs(workspace:GetDescendants()) do
-            if obj.Name == "Quest Simbol" then
-                local model = obj.Parent.Parent
-                if model and model:IsA("Model") and not model:FindFirstChild("TitanESP") then
-                    for _, child in pairs(obj:GetDescendants()) do
-                        if child:IsA("ImageLabel") then
-                            local id = cleanID(child.Image)
-                            if IDS[id] == "YELLOW" then 
-                                local h = Instance.new("Highlight", model); h.Name="TitanESP"; h.FillColor=Color3.fromRGB(255,215,0)
-                            elseif IDS[id] == "RED" then 
-                                local h = Instance.new("Highlight", model); h.Name="TitanESP"; h.FillColor=Color3.fromRGB(255,0,0)
-                            end
-                        end
-                    end
-                end
-            end
-        end
-
-        if not getgenv().TitanActive then continue end
-        if not LocalPlayer.Character or not LocalPlayer.Character:FindFirstChild("HumanoidRootPart") then continue end
-
-        -- Auto-Equipar Arma
-        local bp = LocalPlayer.Backpack
-        local ch = LocalPlayer.Character
-        if not ch:FindFirstChildWhichIsA("Tool") then
-            local t = bp:FindFirstChildWhichIsA("Tool")
-            if t then t.Parent = ch end
-        end
-
-        -- Máquina de Estados
-        if CurrentState == "SEARCHING" then
-            searchPhase()
-        elseif CurrentState == "WAITING_MOBS" then
-            waitingPhase()
-        elseif CurrentState == "KILLING" then
-            killingPhase()
-        end
+    if autoScanEnabled and (currentTime - lastWorkspaceScan >= UPDATE_INTERVAL_WORKSPACE) then
+        scanWorkspace()
+        lastWorkspaceScan = currentTime
     end
 end)
 
-ToggleBtn.MouseButton1Click:Connect(function()
-    getgenv().TitanActive = not getgenv().TitanActive
-    if getgenv().TitanActive then
-        ToggleBtn.Text = "PARAR"
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(150, 0, 0)
-        CurrentState = "SEARCHING"
+--// =========================================================================================
+--// 4. CONEXÕES DE EVENTOS
+--// =========================================================================================
+
+ScanBtn.MouseButton1Click:Connect(function()
+    scanWorkspace()
+end)
+
+CopyBtn.MouseButton1Click:Connect(function()
+    copyLogs()
+end)
+
+TogglePerfBtn.MouseButton1Click:Connect(function()
+    performanceMonitoringEnabled = not performanceMonitoringEnabled
+    if performanceMonitoringEnabled then
+        TogglePerfBtn.Text = "PARAR MONITORAMENTO PERF."
+        TogglePerfBtn.BackgroundColor3 = Color3.fromRGB(150, 100, 50)
+        FPSLabel.TextColor3 = Color3.fromRGB(200, 200, 200) -- Reset color
+        PingLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+        MemoryLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+        lastPerfUpdate = 0 -- Força atualização imediata
     else
-        ToggleBtn.Text = "LIGAR TITAN"
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(0, 100, 0)
-        StatusLbl.Text = "PARADO"
+        TogglePerfBtn.Text = "INICIAR MONITORAMENTO PERF."
+        TogglePerfBtn.BackgroundColor3 = Color3.fromRGB(50, 150, 50)
+        FPSLabel.Text = "FPS: --"
+        PingLabel.Text = "Ping: -- ms"
+        MemoryLabel.Text = "Memória Cliente: -- MB"
+        FPSLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+        PingLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+        MemoryLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
     end
 end)
+
+ToggleAutoScanBtn.MouseButton1Click:Connect(function()
+    autoScanEnabled = not autoScanEnabled
+    if autoScanEnabled then
+        ToggleAutoScanBtn.Text = "PARAR AUTO-SCAN"
+        ToggleAutoScanBtn.BackgroundColor3 = Color3.fromRGB(200, 50, 50)
+        lastWorkspaceScan = 0 -- Força uma varredura imediata
+        LogText.Text = LogText.Text .. "\n[AUTO-SCAN] Ativado. Próxima varredura em " .. UPDATE_INTERVAL_WORKSPACE .. "s.\n"
+        LogText:SetAttribute("CurrentLog", LogText:GetAttribute("CurrentLog") .. "\n[AUTO-SCAN] Ativado. Próxima varredura em " .. UPDATE_INTERVAL_WORKSPACE .. "s.\n")
+    else
+        ToggleAutoScanBtn.Text = "INICIAR AUTO-SCAN"
+        ToggleAutoScanBtn.BackgroundColor3 = Color3.fromRGB(150, 50, 50)
+        LogText.Text = LogText.Text .. "\n[AUTO-SCAN] Desativado.\n"
+        LogText:SetAttribute("CurrentLog", LogText:GetAttribute("CurrentLog") .. "\n[AUTO-SCAN] Desativado.\n")
+    end
+    LogBoxScrollingFrame.CanvasPosition = Vector2.new(0, LogBoxScrollingFrame.CanvasSize.Y.Offset) -- Scroll to bottom
+end)
+
+
+--// =========================================================================================
+--// 5. INICIALIZAÇÃO
+--// =========================================================================================
+task.wait(1) -- Pequeno atraso para a GUI carregar
+updatePerformanceMetrics() -- Atualiza as métricas iniciais
+LogText:SetAttribute("CurrentLog", LogText.Text) -- Inicializa o atributo de log
+
+-- Notificação inicial
+game:GetService("StarterGui"):SetCore("SendNotification", {
+    Title = "Monitor de Performance Ativo";
+    Text = "Use a GUI para monitorar FPS, Ping, Memória e escanear o Workspace.";
+    Duration = 7;
+})
+
+print("Performance Monitor LocalScript Loaded.")
