@@ -1,14 +1,14 @@
 --[[
-    🧟 HUNTER ZOMBIE - SKILL UNLEASHED (v18.0)
+    🧟 HUNTER ZOMBIE - THE IMMORTAL (v19.0)
     
-    CORREÇÃO DE SKILL:
-    1. AttackInterval aumentado para 0.8s (Deixa a animação terminar).
-    2. KeyHoldTime aumentado para 0.35s (Segura a tecla com vontade).
-    3. Pausa Dramática: Para de bater 1.0s antes de soltar skill.
+    Melhorias de Sobrevivência:
+    1. BOSS ORBIT: Gira em círculos ao redor do Boss para desviar de tiros.
+    2. EMERGENCY RETREAT: Se HP < 40%, voa para o céu (Safe Zone) para curar.
+    3. AUTO-REHOOK: Se morrer, o script reconecta sozinho no novo corpo.
     
     Mantém:
-    - Titan Slayer (Boss Mode).
-    - Undertaker (Anti-Cadáver).
+    - Skill Fix (Delay 0.8s).
+    - Titan Slayer (Identifica Boss).
     - Navigator (GPS).
 ]]
 
@@ -23,24 +23,28 @@ local LocalPlayer = Players.LocalPlayer
 -- // CONFIGURAÇÕES //
 local SETTINGS = {
     FarmEnabled = false,
-    FlySpeed = 50,       
+    FlySpeed = 55,       
     
-    -- Distâncias
+    -- Distâncias e Alturas
     NormalDist = 7,
-    BossDist = 20,
-    FloatHeight = 5,
+    BossDist = 18,        -- Distância do Boss (Raio do Círculo)
+    FloatHeight = 5,      -- Altura normal
+    BossHeight = 15,      -- Altura contra Boss (Mais alto é mais seguro)
     
-    -- COMBATE AJUSTADO (O SEGREDO ESTÁ AQUI)
-    AttackInterval = 0.8, -- Bate devagar (quase 1 por segundo) pra não travar animação
-    SkillInterval = 4.0,  -- Usa skill a cada 4 segundos
+    -- Sobrevivência (NOVO)
+    EmergencyHP = 40,     -- Se HP% for menor que isso, foge!
+    RetreatHeight = 60,   -- Altura da fuga (Nuvens)
+    OrbitSpeed = 2,       -- Velocidade do giro em volta do Boss
     
-    PreCastDelay = 0.8,   -- Fica 0.8s SEM FAZER NADA antes de soltar skill
-    KeyHoldTime = 0.35,   -- Segura a tecla da skill por 0.35s
-    CastTime = 0.5,       -- Espera 0.5s depois da skill
+    -- Combate (Lento e Preciso)
+    AttackInterval = 0.8, 
+    SkillInterval = 4.0,  
+    PreCastDelay = 0.8,   
+    KeyHoldTime = 0.35,   
+    CastTime = 0.5,       
     
     -- Anti-Bug
     MaxAttackTime = 4.0,
-    BossHPThreshold = 500
 }
 
 local SKILLS = {"Z", "X", "C", "V"}
@@ -55,22 +59,22 @@ local startAttackTime = 0
 
 -- // GUI SETUP //
 local ScreenGui = Instance.new("ScreenGui")
-ScreenGui.Name = "ZombieSkillFix"
+ScreenGui.Name = "ZombieImmortal"
 if pcall(function() ScreenGui.Parent = CoreGui end) then ScreenGui.Parent = CoreGui else ScreenGui.Parent = LocalPlayer:WaitForChild("PlayerGui") end
 
 local MainFrame = Instance.new("Frame", ScreenGui)
-MainFrame.Size = UDim2.new(0, 300, 0, 160)
-MainFrame.Position = UDim2.new(0.5, -150, 0.65, 0)
-MainFrame.BackgroundColor3 = Color3.fromRGB(5, 20, 5) -- Verde Escuro Tático
-MainFrame.BorderColor3 = Color3.fromRGB(0, 255, 100)
+MainFrame.Size = UDim2.new(0, 320, 0, 170)
+MainFrame.Position = UDim2.new(0.5, -160, 0.65, 0)
+MainFrame.BackgroundColor3 = Color3.fromRGB(10, 20, 30) -- Azul Noturno
+MainFrame.BorderColor3 = Color3.fromRGB(0, 255, 255) -- Ciano Neon
 MainFrame.BorderSizePixel = 2
 MainFrame.Active = true
 MainFrame.Draggable = true
 
 local Title = Instance.new("TextLabel", MainFrame)
 Title.Size = UDim2.new(1, 0, 0, 30)
-Title.Text = "🧪 SKILL FIXER v18"
-Title.TextColor3 = Color3.fromRGB(0, 255, 100)
+Title.Text = "🛡️ IMMORTAL v19"
+Title.TextColor3 = Color3.fromRGB(0, 255, 255)
 Title.BackgroundTransparency = 1
 Title.Font = Enum.Font.GothamBlack
 
@@ -84,7 +88,7 @@ Status.BackgroundTransparency = 1
 local CombatStatus = Instance.new("TextLabel", MainFrame)
 CombatStatus.Size = UDim2.new(1, 0, 0, 20)
 CombatStatus.Position = UDim2.new(0, 0, 0.4, 0)
-CombatStatus.Text = "Ação: -"
+CombatStatus.Text = "Modo: -"
 CombatStatus.TextColor3 = Color3.fromRGB(255, 255, 255)
 CombatStatus.BackgroundTransparency = 1
 CombatStatus.Font = Enum.Font.Code
@@ -92,10 +96,20 @@ CombatStatus.Font = Enum.Font.Code
 local ToggleBtn = Instance.new("TextButton", MainFrame)
 ToggleBtn.Size = UDim2.new(0.9, 0, 0.3, 0)
 ToggleBtn.Position = UDim2.new(0.05, 0, 0.6, 0)
-ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 40, 20)
-ToggleBtn.Text = "LIGAR FARM (SLOW MODE)"
+ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 40, 60)
+ToggleBtn.Text = "LIGAR FARM (AUTO-REHOOK)"
 ToggleBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
 ToggleBtn.Font = Enum.Font.GothamBold
+
+-- // AUTO-REHOOK (RESSURREIÇÃO) //
+LocalPlayer.CharacterAdded:Connect(function(newChar)
+    if isRunning then
+        Status.Text = "♻️ Renascendo..."
+        task.wait(1) -- Espera carregar
+        EnableFlight() -- Reativa voo no novo corpo
+        Status.Text = "♻️ Reconectado!"
+    end
+end)
 
 -- // FUNÇÕES AUXILIARES //
 local function IsBoss(model)
@@ -106,40 +120,33 @@ local function IsBoss(model)
     return false
 end
 
--- // LÓGICA DE SKILL ROBUSTA //
+-- // LÓGICA DE SKILL //
 local function CastNextSkillSequence()
     if combatState ~= "ATTACKING" then return end
     
-    -- 1. PARAR TUDO (SINAL VERMELHO)
     combatState = "PREPARING"
-    CombatStatus.Text = "🛑 PARANDO ATAQUE..."
-    CombatStatus.TextColor3 = Color3.fromRGB(255, 50, 50)
+    CombatStatus.Text = "🛑 SKILL PREP..."
+    CombatStatus.TextColor3 = Color3.fromRGB(255, 100, 100)
     
-    -- Espera a animação do ataque básico acabar totalmente
     task.wait(SETTINGS.PreCastDelay)
     
-    -- 2. SOLTAR SKILL (SINAL AMARELO)
     combatState = "CASTING"
     local key = SKILLS[skillIndex]
-    CombatStatus.Text = "⚡ SEGURANDO: " .. key
+    CombatStatus.Text = "⚡ CAST: " .. key
     CombatStatus.TextColor3 = Color3.fromRGB(255, 255, 0)
     
-    -- Segura a tecla com vontade
     VirtualInputManager:SendKeyEvent(true, Enum.KeyCode[key], false, game)
-    task.wait(SETTINGS.KeyHoldTime) -- Segura por 0.35s
+    task.wait(SETTINGS.KeyHoldTime)
     VirtualInputManager:SendKeyEvent(false, Enum.KeyCode[key], false, game)
     
-    -- 3. ESPERA PÓS-CAST
     task.wait(SETTINGS.CastTime)
     
-    -- Prepara próxima
     skillIndex = skillIndex + 1
     if skillIndex > #SKILLS then skillIndex = 1 end
     lastSkillUsage = tick()
     
-    -- 4. VOLTA A BATER (SINAL VERDE)
     combatState = "ATTACKING"
-    CombatStatus.Text = "⚔️ BATENDO (Lento)"
+    CombatStatus.Text = "⚔️ COMBATE"
     CombatStatus.TextColor3 = Color3.fromRGB(0, 255, 0)
 end
 
@@ -216,7 +223,11 @@ end
 
 -- // VOO //
 local function EnableFlight()
-    local root = LocalPlayer.Character.HumanoidRootPart
+    local char = LocalPlayer.Character
+    if not char then return end
+    local root = char:FindFirstChild("HumanoidRootPart")
+    if not root then return end
+    
     if not root:FindFirstChild("NavVelocity") then
         local bv = Instance.new("BodyVelocity")
         bv.Name = "NavVelocity"
@@ -229,7 +240,7 @@ local function EnableFlight()
         bg.P = 20000
         bg.CFrame = root.CFrame
         bg.Parent = root
-        LocalPlayer.Character.Humanoid.PlatformStand = true
+        char.Humanoid.PlatformStand = true
     end
 end
 
@@ -243,7 +254,7 @@ local function DisableFlight()
 end
 
 -- // MAIN LOOP //
-local isRunning = false
+isRunning = false -- Global para o Rehook ver
 
 ToggleBtn.MouseButton1Click:Connect(function()
     isRunning = not isRunning
@@ -253,8 +264,8 @@ ToggleBtn.MouseButton1Click:Connect(function()
         EnableFlight()
         TempBlacklist = {}
     else
-        ToggleBtn.Text = "LIGAR FARM (SLOW MODE)"
-        ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 40, 20)
+        ToggleBtn.Text = "LIGAR IMMORTAL FARM"
+        ToggleBtn.BackgroundColor3 = Color3.fromRGB(20, 40, 60)
         Status.Text = "Parado"
         DisableFlight()
     end
@@ -265,7 +276,8 @@ RunService.Heartbeat:Connect(function()
     local char = LocalPlayer.Character
     if not char then return end
     local root = char:FindFirstChild("HumanoidRootPart")
-    if not root then return end
+    local hum = char:FindFirstChild("Humanoid")
+    if not root or not hum then return end
     
     CheckVoid()
     if not root:FindFirstChild("NavVelocity") then EnableFlight() end
@@ -273,7 +285,20 @@ RunService.Heartbeat:Connect(function()
     local tool = char:FindFirstChildOfClass("Tool")
     if not tool then
         local bp = LocalPlayer.Backpack:FindFirstChildOfClass("Tool")
-        if bp then char.Humanoid:EquipTool(bp) end
+        if bp then hum:EquipTool(bp) end
+    end
+
+    -- MONITOR DE EMERGÊNCIA (HP)
+    local hpPercent = (hum.Health / hum.MaxHealth) * 100
+    if hpPercent < SETTINGS.EmergencyHP then
+        Status.Text = "🚨 EMERGÊNCIA! CURANDO..."
+        Status.TextColor3 = Color3.fromRGB(255, 0, 0)
+        CombatStatus.Text = "HP BAIXO (" .. math.floor(hpPercent) .. "%)"
+        
+        -- Voa pro céu
+        root.NavVelocity.Velocity = Vector3.new(0, 50, 0) 
+        root.NavGyro.CFrame = CFrame.new(root.Position, root.Position + Vector3.new(0,1,0))
+        return -- Interrompe o resto do loop pra focar em fugir
     end
 
     local target = GetEntityTarget()
@@ -285,7 +310,9 @@ RunService.Heartbeat:Connect(function()
         
         local isBossFight = IsBoss(target)
         local safeDist = isBossFight and SETTINGS.BossDist or SETTINGS.NormalDist
+        local safeHeight = isBossFight and SETTINGS.BossHeight or SETTINGS.FloatHeight
         
+        -- Timeout
         if currentTargetID ~= target then
             currentTargetID = target
             startAttackTime = tick()
@@ -298,8 +325,8 @@ RunService.Heartbeat:Connect(function()
         
         Status.Text = "Alvo: " .. target.Name
         
-        if dist > safeDist then
-            -- NAVEGAÇÃO
+        if dist > safeDist + 5 then -- +5 de margem pra não ficar tremendo
+            -- NAVEGAÇÃO (CHEGANDO PERTO)
             local movePos = tPos
             if not CanSeeTarget(target.HumanoidRootPart) then
                 if tick() - lastPathCalc > 0.5 or not currentWaypoints or currentWaypointIndex > #currentWaypoints then
@@ -308,11 +335,11 @@ RunService.Heartbeat:Connect(function()
                 end
                 if currentWaypoints and currentWaypoints[currentWaypointIndex] then
                     local wp = currentWaypoints[currentWaypointIndex]
-                    movePos = wp.Position + Vector3.new(0, SETTINGS.FloatHeight, 0)
+                    movePos = wp.Position + Vector3.new(0, safeHeight, 0)
                     if (myPos - movePos).Magnitude < 4 then currentWaypointIndex = currentWaypointIndex + 1 end
                 end
             else
-                movePos = tPos + Vector3.new(0, SETTINGS.FloatHeight, 0)
+                movePos = tPos + Vector3.new(0, safeHeight, 0)
             end
             
             local direction = (movePos - myPos).Unit
@@ -321,18 +348,28 @@ RunService.Heartbeat:Connect(function()
             
             combatState = "ATTACKING"
         else
-            -- COMBATE
-            root.NavVelocity.Velocity = Vector3.new(0,0,0)
-            root.NavGyro.CFrame = CFrame.lookAt(myPos, Vector3.new(tPos.X, myPos.Y, tPos.Z))
+            -- COMBATE (MODO ORBIT)
+            if isBossFight then
+                -- Matemática de Giro: Cria um círculo em volta do Boss
+                local time = tick() * SETTINGS.OrbitSpeed
+                local orbitOffset = Vector3.new(math.cos(time) * safeDist, safeHeight, math.sin(time) * safeDist)
+                local orbitPos = tPos + orbitOffset
+                
+                -- Voa para a posição do giro
+                local direction = (orbitPos - myPos).Unit
+                root.NavVelocity.Velocity = direction * SETTINGS.FlySpeed
+                root.NavGyro.CFrame = CFrame.lookAt(myPos, tPos) -- Olha pro Boss
+            else
+                -- Zumbi normal só freia
+                root.NavVelocity.Velocity = Vector3.new(0,0,0)
+                root.NavGyro.CFrame = CFrame.lookAt(myPos, Vector3.new(tPos.X, myPos.Y, tPos.Z))
+            end
             
             if combatState == "ATTACKING" then
-                -- ATAQUE LENTO (0.8s)
                 if tick() - lastBasicAttack > SETTINGS.AttackInterval then
                     if tool then tool:Activate() end
                     lastBasicAttack = tick()
                 end
-                
-                -- TENTA USAR SKILL
                 if tick() - lastSkillUsage > SETTINGS.SkillInterval then
                     task.spawn(CastNextSkillSequence)
                 end
