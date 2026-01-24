@@ -1,0 +1,8 @@
+-- ARQUIVO NO GITHUB (whitelist.lua)
+return {
+    -- ["123456789"] = ID_DO_COMPRADOR
+    
+    ["KEY"] = 8207477642, 
+    ["KEY"] = 99887766,
+    ["KEY-ADM-TESTE"] = 55443322
+}
